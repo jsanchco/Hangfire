@@ -1,6 +1,8 @@
-﻿using HangFire.Application.Models;
+﻿using Hangfire;
+using HangFire.Application.Models;
 using HangFire.Application.Services;
 using System.Reflection;
+using System.Reflection.Metadata;
 
 namespace HangFire.Web.HostedServices
 {
@@ -58,10 +60,24 @@ namespace HangFire.Web.HostedServices
             {
                 foreach (var jobConfig in codereJobsConfig)
                 {
-                    AddJobService(jobConfig);
+                    var type = GetTypeFromConfig(jobConfig);
+                    if (type is null)
+                        continue;
+
+                    RecurringJob.AddOrUpdate(
+                        jobConfig.Name, 
+                        () => ExecuteJob(type, jobConfig), 
+                        jobConfig.CronExpression);
                 }
                 return;
             }
+        }
+
+        private void ExecuteJob(Type type, CodereJobConfig jobConfig)
+        {
+            var instance = Activator.CreateInstance(type, new object[] { jobConfig });
+            var methodInfo = type.GetMethod("Execute");
+            methodInfo?.Invoke(instance, null);
         }
 
         public CodereJobService? GetCodereJobServiceByName(string name)
@@ -74,56 +90,33 @@ namespace HangFire.Web.HostedServices
             return _jobServices.Where(x => x.Enabled);
         }
 
-        private object? AddJobService(CodereJobConfig jobConfig)
+        private Type? GetTypeFromConfig(CodereJobConfig jobConfig)
         {
-            var typeService = GetTypeService(jobConfig.RouteAssembly, jobConfig.NameSpace);
-            if (typeService == null)
-            {
-                _logger.LogInformation($"NOT possible GetTypeService [Assembly: {jobConfig.RouteAssembly}], [NameSpace: {jobConfig.NameSpace}]");
-                return null;
-            }
-
-            var instance = Activator.CreateInstance(typeService, new object[] { jobConfig });
-            if (instance == null)
-            {
-                _logger.LogInformation($"NOT possible CreateInstance [Assembly: {jobConfig.RouteAssembly}], [NameSpace: {jobConfig.NameSpace}]");
-                return null;
-            }
-
-            var methodInfo = typeService.GetMethod("Execute");
-            if (methodInfo == null)
-            {
-                _logger.LogInformation($"NOT possible find method 'Execute' in [Assembly: {jobConfig.RouteAssembly}], [NameSpace: {jobConfig.NameSpace}]");
-                return null;
-            }
-
-            var codereJobService = (CodereJobService)instance;
-            _jobServices.Add(codereJobService);
-            _logger.LogInformation($"Add {codereJobService}");
-
-            return instance;
-        }
-
-        private Type? GetTypeService(string assemblyFile, string serviceTypeOf)
-        {
-            var assembly = Assembly.LoadFrom(assemblyFile);
+            var assembly = Assembly.LoadFrom(jobConfig.RouteAssembly);
             if (assembly == null)
             {
-                _logger.LogInformation($"Assembly [{assemblyFile}] NOT found");
+                _logger.LogInformation($"Assembly [{jobConfig.RouteAssembly}] NOT found");
                 return null;
             }
 
             var types = assembly.GetTypes();
-            var findType = types.FirstOrDefault(x => x.FullName == serviceTypeOf);
+            var findType = types.FirstOrDefault(x => x.FullName == jobConfig.NameSpace);
             if (findType == null)
             {
-                _logger.LogInformation($"Type [{serviceTypeOf}] NOT found in Assembly [{assembly.FullName}]");
+                _logger.LogInformation($"Type [{jobConfig.NameSpace}] NOT found in Assembly [{assembly.FullName}]");
                 return null;
             }
 
             if (findType.BaseType?.Name != "CodereJobService")
             {
                 _logger.LogInformation($"Type [CodereJobService] NOT found in Assembly [{assembly.FullName}]");
+                return null;
+            }
+
+            var methodInfo = findType.GetMethod("Execute");
+            if (methodInfo == null)
+            {
+                _logger.LogInformation($"NOT possible find method 'Execute' in [Assembly: {jobConfig.RouteAssembly}], [NameSpace: {jobConfig.NameSpace}]");
                 return null;
             }
 
