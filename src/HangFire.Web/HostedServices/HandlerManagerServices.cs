@@ -2,7 +2,6 @@
 using HangFire.Application.Models;
 using HangFire.Application.Services;
 using System.Reflection;
-using System.Reflection.Metadata;
 
 namespace HangFire.Web.HostedServices
 {
@@ -32,12 +31,12 @@ namespace HangFire.Web.HostedServices
                 ReloadServices(stoppingToken);
                 _available = true;
             }
-            catch(Exception ex)
+            catch (Exception ex)
             {
                 _logger.LogError(ex, $"Error in loading CodereJobsConfig");
                 _available = false;
             }
-            
+
             return Task.CompletedTask;
         }
 
@@ -65,8 +64,8 @@ namespace HangFire.Web.HostedServices
                         continue;
 
                     RecurringJob.AddOrUpdate(
-                        jobConfig.Name, 
-                        () => ExecuteJob(type, jobConfig), 
+                        jobConfig.Name,
+                        () => ExecuteJob(type, jobConfig),
                         jobConfig.CronExpression);
                 }
                 return;
